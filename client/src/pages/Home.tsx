@@ -144,7 +144,7 @@ function Home() {
               </select>
               <ChevronDown size={13} strokeWidth={2.2} />
             </label>
-            <button className="nav-cta" onClick={handlePickup}>
+            <button className="nav-cta" onClick={() => { window.location.href = "/generator"; }}>
               Recycle with Ecova <ArrowUpRight size={15} />
             </button>
             <button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen((open) => !open)}>
