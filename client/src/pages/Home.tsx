@@ -115,6 +115,8 @@ function Home() {
 
   const selectRole = (nextRole: Role) => {
     setRole(nextRole);
+    if (nextRole === "Generator") { window.location.href = "/generator"; return; }
+    if (nextRole === "Collector") { window.location.href = "/collector"; return; }
     toast(`Demo role: ${nextRole}`, {
       description: "This switcher changes the demonstration perspective only — it is not authentication.",
     });

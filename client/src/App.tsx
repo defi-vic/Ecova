@@ -3,6 +3,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { EcovaDataProvider } from "./contexts/EcovaDataContext";
+import Collector from "./pages/Collector";
 import Generator from "./pages/Generator";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
@@ -12,6 +14,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/generator" component={Generator} />
+      <Route path="/collector" component={Collector} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
@@ -24,7 +27,9 @@ function App() {
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <EcovaDataProvider>
+            <Router />
+          </EcovaDataProvider>
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
