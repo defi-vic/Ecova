@@ -87,6 +87,7 @@ export type EcovaPickup = {
   aiNotes?: string;
   contaminationEstimate?: string;
   events: EcovaEvent[];
+  isDemo?: boolean;
 };
 
 export type EcovaReward = {
@@ -126,8 +127,14 @@ function parseMetadata(value: string | null) {
 
 async function getOrCreateGenerator(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, sessionKey: string) {
   const existing = await db.select().from(generatorProfiles).where(eq(generatorProfiles.sessionKey, sessionKey)).limit(1);
-  if (existing[0]) return existing[0];
-  await db.insert(generatorProfiles).values({ sessionKey, displayName: "Demo Generator", role: "GENERATOR" });
+  if (existing[0]) {
+    if (sessionKey.startsWith("ecova-generator") && !existing[0].isDemo) {
+      await db.update(generatorProfiles).set({ isDemo: true }).where(eq(generatorProfiles.id, existing[0].id));
+      return { ...existing[0], isDemo: true };
+    }
+    return existing[0];
+  }
+  await db.insert(generatorProfiles).values({ sessionKey, displayName: "Demo Generator", role: "GENERATOR", isDemo: sessionKey.startsWith("ecova-generator") });
   const created = await db.select().from(generatorProfiles).where(eq(generatorProfiles.sessionKey, sessionKey)).limit(1);
   if (!created[0]) throw new Error("Unable to create generator profile");
   return created[0];
@@ -151,7 +158,7 @@ async function addEvent(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, pick
 async function seedPickup(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, generatorId: number, collectorId: number, seed: typeof seedRecords[number]) {
   const found = await db.select().from(pickupRequests).where(eq(pickupRequests.pickupCode, seed.code)).limit(1);
   if (found[0]) return found[0];
-  await db.insert(pickupRequests).values({ pickupCode: seed.code, generatorId, collectorId, materialType: seed.material, estimatedWeight: seed.estimated.toFixed(2), verifiedWeight: seed.verified.toFixed(2), status: "RECYCLED", pickupLocation: seed.location, preferredDate: seed.date, preferredTime: seed.window });
+  await db.insert(pickupRequests).values({ pickupCode: seed.code, generatorId, collectorId, materialType: seed.material, estimatedWeight: seed.estimated.toFixed(2), verifiedWeight: seed.verified.toFixed(2), status: "RECYCLED", pickupLocation: seed.location, preferredDate: seed.date, preferredTime: seed.window, isDemo: true });
   const pickup = (await db.select().from(pickupRequests).where(eq(pickupRequests.pickupCode, seed.code)).limit(1))[0];
   if (!pickup) throw new Error(`Unable to seed ${seed.code}`);
   await db.insert(wasteSubmissions).values({ pickupId: pickup.id, detectedMaterial: seed.material, aiConfidence: "0.94", aiNotes: "Seed presentation record. New uploads use the configured fallback classifier until a vision service is connected.", estimatedWeight: seed.estimated.toFixed(2), contaminationEstimate: seed.condition === "Clean" ? "Low" : "Medium" });
@@ -170,7 +177,7 @@ export async function ensureDemoData(generatorSessionKey: string, collectorSessi
   const generator = await getOrCreateGenerator(db, generatorSessionKey);
   const collector = await getOrCreateCollector(collectorSessionKey);
   const existing = await db.select({ id: pickupRequests.id }).from(pickupRequests).where(eq(pickupRequests.generatorId, generator.id)).limit(1);
-  if (existing.length === 0) {
+  if (existing.length === 0 && generator.isDemo) {
     for (const seed of seedRecords) await seedPickup(db, generator.id, collector.id, seed);
   }
   return { db, generator, collector };
@@ -214,13 +221,14 @@ async function loadPickups(db: NonNullable<Awaited<ReturnType<typeof getDb>>>, r
       aiNotes: submission?.aiNotes ?? undefined,
       contaminationEstimate: submission?.contaminationEstimate ?? undefined,
       events: pickupEvents.map((event) => ({ id: event.id, type: event.eventType, actorRole: event.actorRole, actor: event.actorRole === "COLLECTOR" ? collector?.displayName ?? "Collector" : "Generator", metadata: parseMetadata(event.metadata), createdAt: formatTimestamp(event.createdAt) })),
+      isDemo: Boolean(row.isDemo),
     } satisfies EcovaPickup;
   });
 }
 
 export async function getGeneratorState(generatorSessionKey: string, collectorSessionKey = "ecova-collector-demo") {
   const { db, generator, collector } = await ensureDemoData(generatorSessionKey, collectorSessionKey);
-  const rows = await db.select().from(pickupRequests).where(eq(pickupRequests.generatorId, generator.id)).orderBy(desc(pickupRequests.id));
+  const rows = await db.select().from(pickupRequests).where(eq(pickupRequests.generatorId, generator.id)).orderBy(desc(pickupRequests.id)).limit(100);
   const pickups = await loadPickups(db, rows);
   const rewards = await db.select().from(rewardTransactions).where(eq(rewardTransactions.generatorId, generator.id)).orderBy(desc(rewardTransactions.id));
   const transactions: EcovaReward[] = rewards.map((item) => ({ id: item.transactionCode, amount: item.rewardAmount, pickupId: rows.find((row) => row.id === item.pickupId)?.pickupCode ?? "", item: `${rows.find((row) => row.id === item.pickupId)?.materialType ?? "Collection"} · ${asNumber(item.verifiedWeight).toFixed(2)} KG verified`, date: formatDate(item.createdAt), negative: item.rewardAmount < 0 }));
@@ -232,7 +240,7 @@ export async function getGeneratorState(generatorSessionKey: string, collectorSe
 
 export async function getCollectorState(collectorSessionKey: string, generatorSessionKey = "ecova-generator-demo") {
   const { db, collector } = await ensureDemoData(generatorSessionKey, collectorSessionKey);
-  const rows = await db.select().from(pickupRequests).orderBy(desc(pickupRequests.id));
+  const rows = await db.select().from(pickupRequests).where(sql`${pickupRequests.status} in ('REQUESTED', 'ASSIGNED', 'ARRIVED', 'COLLECTED', 'VERIFIED', 'DELIVERED', 'RECYCLED')`).orderBy(desc(pickupRequests.id)).limit(100);
   const pickups = await loadPickups(db, rows);
   const earnings = await db.select().from(collectorEarnings).where(eq(collectorEarnings.collectorId, collector.id)).orderBy(desc(collectorEarnings.id));
   const earningsByPickup = await db.select().from(pickupRequests).where(inArray(pickupRequests.id, earnings.map((item) => item.pickupId).length ? earnings.map((item) => item.pickupId) : [0]));
@@ -255,7 +263,7 @@ export async function getProfileIds(generatorSessionKey: string, collectorSessio
 }
 
 export async function nextPickupCode(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
-  const rows = await db.select({ pickupCode: pickupRequests.pickupCode }).from(pickupRequests);
+  const rows = await db.select({ pickupCode: pickupRequests.pickupCode }).from(pickupRequests).orderBy(desc(pickupRequests.id)).limit(1000);
   const max = rows.reduce((highest, row) => Math.max(highest, Number(row.pickupCode.replace("EC-", "")) || 0), 1050);
   return `EC-${max + 1}`;
 }

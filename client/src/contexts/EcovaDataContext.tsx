@@ -42,6 +42,8 @@ type EcovaDataContextValue = {
   notifications: string[];
   dataLoading: boolean;
   dataError?: string;
+  syncStatus: "loading" | "live" | "degraded";
+  isMutating: boolean;
   setCollectorOnline: (online: boolean) => Promise<void>;
   classifyWaste: (imageData: string | undefined, estimatedWeight: number, selectedMaterial: string) => Promise<ClassificationResult>;
   createPickup: (input: CreatePickupInput) => Promise<string>;
@@ -49,6 +51,8 @@ type EcovaDataContextValue = {
   markArrived: (id: string) => Promise<void>;
   markCollected: (id: string) => Promise<void>;
   verifyWeight: (id: string, weight: number, condition: MaterialCondition, proofImageData?: string, notes?: string) => Promise<{ rewardAmount: number }>;
+  deliverToHub: (id: string) => Promise<void>;
+  confirmRecycling: (id: string) => Promise<void>;
   redeemReward: (amount: number) => Promise<void>;
 };
 
@@ -89,6 +93,8 @@ export function EcovaDataProvider({ children }: { children: React.ReactNode }) {
   const arriveMutation = trpc.ecova.markArrived.useMutation();
   const collectMutation = trpc.ecova.markCollected.useMutation();
   const verifyMutation = trpc.ecova.verifyWeight.useMutation();
+  const hubMutation = trpc.ecova.deliverToHub.useMutation();
+  const recycleMutation = trpc.ecova.confirmRecycling.useMutation();
   const redeemMutation = trpc.ecova.redeemReward.useMutation();
   const notify = (message: string) => setNotifications((current) => [message, ...current].slice(0, 6));
   const sync = async () => { await Promise.all([utils.ecova.generatorState.invalidate(), utils.ecova.collectorState.invalidate()]); };
@@ -118,20 +124,24 @@ export function EcovaDataProvider({ children }: { children: React.ReactNode }) {
     if (!Number.isFinite(weight) || weight <= 0) throw new Error("Enter a verified weight greater than zero.");
     try { const result = await verifyMutation.mutateAsync({ collectorSessionKey, pickupCode: id, verifiedWeight: weight, materialCondition: condition, proofImageData, notes }); await sync(); notify(`WEIGHT VERIFIED · ${id} · ${weight.toFixed(2)} KG · +${result.rewardAmount} ECO`); return { rewardAmount: result.rewardAmount }; } catch (error) { return handleError(error) as never; }
   };
+  const deliverToHub = async (id: string) => { try { await hubMutation.mutateAsync({ collectorSessionKey, pickupCode: id }); await sync(); notify(`HUB RECEIVED · ${id}`); } catch (error) { handleError(error); } };
+  const confirmRecycling = async (id: string) => { try { await recycleMutation.mutateAsync({ collectorSessionKey, pickupCode: id }); await sync(); notify(`RECYCLING CONFIRMED · ${id}`); } catch (error) { handleError(error); } };
   const redeemReward = async (amount: number) => { try { await redeemMutation.mutateAsync({ generatorSessionKey, amount }); await sync(); } catch (error) { handleError(error); } };
 
   const generatorState = generatorQuery.data;
   const collectorState = collectorQuery.data;
   const value: EcovaDataContextValue = {
-    pickups: (generatorState?.pickups ?? seedPickups).map((pickup) => ({ ...pickup, status: pickup.status as PickupStatus })),
-    balance: generatorState?.balance ?? seedTransactions.reduce((sum, item) => sum + item.amount, 0),
-    transactions: generatorState?.transactions ?? seedTransactions,
+    pickups: (generatorState?.pickups ?? []).map((pickup) => ({ ...pickup, status: pickup.status as PickupStatus })),
+    balance: generatorState?.balance ?? 0,
+    transactions: generatorState?.transactions ?? [],
     collectorEarnings: collectorState?.earnings ?? [],
     impact: generatorState?.impact ?? seedImpact,
     collectorOnline: collectorState?.collector.availabilityStatus === "OFFLINE" ? false : true,
     notifications,
     dataLoading: generatorQuery.isLoading || collectorQuery.isLoading,
     dataError: generatorQuery.error?.message ?? collectorQuery.error?.message,
+    syncStatus: generatorQuery.isLoading || collectorQuery.isLoading ? "loading" : generatorQuery.error || collectorQuery.error ? "degraded" : "live",
+    isMutating: [classifyMutation, createMutation, availabilityMutation, acceptMutation, arriveMutation, collectMutation, verifyMutation, hubMutation, recycleMutation, redeemMutation].some((mutation) => mutation.isPending),
     setCollectorOnline,
     classifyWaste,
     createPickup,
@@ -139,6 +149,8 @@ export function EcovaDataProvider({ children }: { children: React.ReactNode }) {
     markArrived,
     markCollected,
     verifyWeight,
+    deliverToHub,
+    confirmRecycling,
     redeemReward,
   };
   return <EcovaDataContext.Provider value={value}>{children}</EcovaDataContext.Provider>;

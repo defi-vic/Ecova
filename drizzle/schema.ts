@@ -1,4 +1,4 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, uniqueIndex, index } from "drizzle-orm/mysql-core";
+import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, uniqueIndex, index } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
@@ -17,6 +17,7 @@ export const generatorProfiles = mysqlTable("generator_profiles", {
   sessionKey: varchar("sessionKey", { length: 128 }).notNull().unique(),
   displayName: varchar("displayName", { length: 160 }).notNull().default("Demo Generator"),
   role: mysqlEnum("role", ["GENERATOR"]).notNull().default("GENERATOR"),
+  isDemo: boolean("isDemo").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -43,9 +44,10 @@ export const pickupRequests = mysqlTable("pickup_requests", {
   pickupLocation: varchar("pickupLocation", { length: 500 }).notNull(),
   preferredDate: varchar("preferredDate", { length: 80 }).notNull(),
   preferredTime: varchar("preferredTime", { length: 120 }).notNull(),
+  isDemo: boolean("isDemo").notNull().default(false),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, (table) => ({ generatorIdx: index("pickup_requests_generator_idx").on(table.generatorId), statusIdx: index("pickup_requests_status_idx").on(table.status) }));
+}, (table) => ({ generatorIdx: index("pickup_requests_generator_idx").on(table.generatorId), collectorIdx: index("pickup_requests_collector_idx").on(table.collectorId), statusIdx: index("pickup_requests_status_idx").on(table.status) }));
 
 export const wasteSubmissions = mysqlTable("waste_submissions", {
   id: int("id").autoincrement().primaryKey(),
@@ -101,7 +103,7 @@ export const chainOfCustodyEvents = mysqlTable("chain_of_custody_events", {
   actorRole: varchar("actorRole", { length: 40 }),
   metadata: text("metadata"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-}, (table) => ({ pickupIdx: index("chain_events_pickup_idx").on(table.pickupId), typeIdx: index("chain_events_type_idx").on(table.eventType) }));
+}, (table) => ({ pickupIdx: index("chain_events_pickup_idx").on(table.pickupId), typeIdx: index("chain_events_type_idx").on(table.eventType), pickupTypeIdx: uniqueIndex("chain_events_pickup_type_idx").on(table.pickupId, table.eventType) }));
 
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
