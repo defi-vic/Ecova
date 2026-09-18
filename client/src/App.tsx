@@ -8,8 +8,8 @@ import Collector from "./pages/Collector";
 import Generator from "./pages/Generator";
 import Home from "./pages/Home";
 import NotFound from "./pages/NotFound";
-
 function Router() {
+  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
       <Route path="/" component={Home} />
